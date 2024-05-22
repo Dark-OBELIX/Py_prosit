@@ -1,155 +1,161 @@
-import sys, os
-from PyQt5.QtWidgets import QApplication, QFileDialog, QWidget
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+import sys
+from PyQt5.QtWidgets import QApplication, QFileDialog
 from PyQt5.QtCore import QDir
 from docx import Document
+from docx.shared import Pt
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 import re
-import docx 
-import openai
+
+class DocumentProcessor:
+    def __init__(self):
+        self.dialog = QFileDialog()
+        self.first_line_processed = False
+        self.process_problematic = False
+        self.process_keywords = False
+
+    def get_docx_file(self):
+        # Open a file dialog to select a DOCX file
+        self.dialog.setFileMode(QFileDialog.ExistingFiles)
+        self.dialog.setFilter(QDir.Files)
+
+        if self.dialog.exec_():
+            file_name = self.dialog.selectedFiles()
+            if file_name[0].endswith('.docx'):
+                return True, str(file_name[0])
+            else:
+                print("Error: The selected file is not a DOCX")
+                return False, ""
+        else:
+            print("Error: No file selected")
+            return False, ""
+
+    def find_words_in_docx(self, file_path, words):
+        # Open the document
+        doc = Document(file_path)
+
+        # Convert words to lowercase for case-insensitive comparison
+        words_lower = [word.lower() for word in words]
+
+        # Initialize a list to store the results
+        found_words = []
+
+        # Initialize line number
+        line_number = 0
+
+        # Iterate through all paragraphs in the document
+        for paragraph in doc.paragraphs:
+            # Increment the line number
+            line_number += 1
+            # Convert paragraph text to lowercase
+            paragraph_text_lower = paragraph.text.lower()
+            # Check if any of the words are present in the paragraph text
+            for word in words_lower:
+                if word in paragraph_text_lower:
+                    found_words.append((word, line_number))
+
+        # Return the list of found words with their lines
+        return found_words
+
+    def copy_file_to_docx(self, source_file_path, titles):
+        # Create a new Word document
+        doc = Document()
+
+        # Define the font style for the entire document
+        style = doc.styles['Normal']
+        font = style.font
+        font.name = 'Arial'
+        font.size = Pt(11)
+
+        # Open the source file
+        source_doc = Document(source_file_path)
+
+        # Iterate through each paragraph in the source document
+        for index, paragraph in enumerate(source_doc.paragraphs):
+            try:
+                # Clean the text to remove incompatible characters
+                clean_text = paragraph.text
+
+                # Process the first line containing text
+                if not self.first_line_processed and clean_text.strip():
+                    doc.add_picture("logo_cesi.jpg")
+                    p = doc.add_paragraph(clean_text)
+                    p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                    p.runs[0].bold = True
+                    self.first_line_processed = True
+                    continue
+
+                # Check if the current paragraph should be a title
+                title = next((t for t, l in titles if l == index + 1), None)
+                if title:
+                    # Capitalize the first letter of the title
+                    title = self.capitalize_first_letter(title)
+                    # Add the paragraph with the "Title 1" style
+                    doc.add_heading(title, level=1)
+                    self.process_problematic = (title.lower() == "problématique")
+                    self.process_keywords = any(word in title.lower() for word in ["mots clés", "mots-clés", "mot-clés", "mots clefs"])
+                elif self.process_problematic:
+                    # Add paragraphs following the "Problématique" title in bold with 4 spaces before
+                    p = doc.add_paragraph("    " + clean_text)
+                    p.runs[0].bold = True
+                elif self.process_keywords:
+                    # Add paragraphs following the "Mots clés" title with 3 spaces and a hyphen
+                    p = doc.add_paragraph("   - " + clean_text)
+                else:
+                    # Add the paragraph with the normal style
+                    p = doc.add_paragraph(clean_text)
+                    for run in p.runs:
+                        run.font.name = 'Arial'
+                        run.font.size = Pt(11)
+            except Exception as e:
+                print(f"Error processing paragraph {index + 1}: {e}")
+                continue
+
+        # Save the Word document under the name "CER_prosit_<number>_hugo_laplace.docx"
+        before, after = self.split_path(source_file_path)
+        var_num = str(self.extract_number_from_string(after))
+        doc_finished_name = "CER_prosit_" + var_num + "_hugo_laplace.docx"
+        doc.save(before + "\\" + doc_finished_name)
+        print("File saved as: ", before + "\\" + doc_finished_name)
+
+    @staticmethod
+    def split_path(file_path):
+        last_slash_index = -1
+
+        # Loop to find the index of the last '/' or '\'
+        for i in range(len(file_path)):
+            if file_path[i] == '/' or file_path[i] == '\\':
+                last_slash_index = i
+
+        # Extract what is before and after the last '/'
+        if last_slash_index != -1:
+            before_last_slash = file_path[:last_slash_index]
+            after_last_slash = file_path[last_slash_index + 1:]
+        else:
+            before_last_slash = ""
+            after_last_slash = file_path
+
+        return before_last_slash, after_last_slash
+
+    @staticmethod
+    def extract_number_from_string(s):
+        # Use a regular expression to find the number in the string
+        match = re.search(r'\d+', s)
+        if match:
+            return int(match.group())
+        else:
+            return None
+
+    @staticmethod
+    def capitalize_first_letter(s):
+        return s[:1].upper() + s[1:]
+
+############################################################
 
 app = QApplication(sys.argv)
-dialog = QFileDialog()  # Définissez la boîte de dialogue comme une variable globale
+processor = DocumentProcessor()
 
-def get_docx_file():
-    dialog.setFileMode(QFileDialog.ExistingFiles)
-    dialog.setFilter(QDir.Files)
-
-    if dialog.exec_():
-        file_name = dialog.selectedFiles()
-        if file_name[0].endswith('.docx'):
-            print(file_name[0])
-            return True, str(file_name[0])
-        else:
-            print("Erreur : Le fichier sélectionné n'est pas un docx")
-            return False, ""
-    else:
-        print("Erreur : Pas de fichier sélectionné")
-        return False, ""
-
-def generate_text(prompt):
-    
-    openai.api_key = "chat_gpt_api_here"
-
-    completions = openai.Completion.create(
-        engine="text-davinci-002",
-        prompt=prompt,
-        max_tokens=1024,
-        n=1,
-        stop=None,
-        temperature=0.5,
-    )
-
-    message = completions.choices[0].text
-    return message.strip()
-
-def est_titre_de_categorie(ligne, tab_categorie):
-    # Vérifie si la ligne est un titre de catégorie suivi de ":"
-    for catégorie in tab_categorie:
-        if ligne.strip().lower() == catégorie.lower() + " :":
-            return True
-        if ligne.strip().lower() + " :" == catégorie.lower():
-            return True
-        if ligne.strip().lower() == catégorie.lower() :
-            return True
-    return False
-
-
-def afficher_categories(texte, tab_categorie):
-    # Convertir le texte en lignes
-    lignes = texte.split('\n')
-    
-    # Initialiser une variable pour suivre le type actuel (1 pour catégorie, 2 pour mots clés, 3 pour le texte)
-    type_actuel = 1  # Texte par défaut
-    
-
-	# Parcourir chaque ligne du texte
-    titre = True
-
-    for ligne in lignes:
-
-        if titre == True and ligne != "":
-            titre = doc_final.add_heading(ligne, level=1)  
-            titre.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-            titre = False
-
-        elif est_titre_de_categorie(ligne, tab_categorie):    # Vérifier si la ligne est un titre de catégorie suivi de ":"
-
-            type_actuel = 1  
-            doc_final.add_heading(ligne, level=1)  
-
-            if 'Mots clés' in ligne or 'Mots clés ' in ligne or 'Mots-clés' in ligne or'Mot clés' in ligne or 'Mot-clés'in ligne or 'Définition mots-clefs'in ligne or 'Définition mots-clef'in ligne or 'Mots clefs : ' in ligne:
-                type_actuel = 2  # Passer au type "Mots clés"
-
-            elif 'Problématique' in ligne or 'Problématiques' in ligne or 'problématique' in ligne or 'problématiques' in ligne or 'Problématique ? ' in ligne:
-                type_actuel = 4 
-            else:
-            	type_actuel = 1  
-
-
-        elif type_actuel == 2 and ligne.strip() : # mots cles a traiter
-            #doc_final.add_paragraph("mots cles" + ligne)  
-            doc_final.add_paragraph("        - " + ligne)  
-
-        elif type_actuel == 4  and ligne.strip(): # Problématique a traiter
-
-            paragraph = doc_final.add_paragraph()
-            run = paragraph.add_run("               - " + ligne)
-            bold_style = run.bold = True
-
-        else:
-            type_actuel = 3  # Texte par défaut
-            doc_final.add_paragraph(ligne)
-
-# Récupérer le nom du fichier Word
-importOk, doc_name = get_docx_file()
-
-# Si le fichier a été sélectionné avec succès, copier son contenu dans un fichier temp.txt et appliquer les traitements
+importOk, doc = processor.get_docx_file()
 if importOk:
-    try:
-
-        doc = Document(doc_name)
-
-        chemin_fichier  = os.path.dirname(doc_name)
-        print("path :" , chemin_fichier )
-        contenu = ""
-
-        # Parcourir le contenu du fichier Word et le copier dans contenu
-        for paragraphe in doc.paragraphs:
-            contenu += paragraphe.text + '\n'
-
-        # Copier le contenu dans un fichier temp.txt
-        with open('temp.txt', 'w', encoding='utf-8') as fichier_temp:
-            fichier_temp.write(contenu)
-
-        # Liste des catégories
-        tab_categorie = ['Analyse du contexte','Définition mots-clefs ', 'Contexte', 'Mots clés', 'Mots-clés', 'Mot clés', 'Mot-clés', 'Problématique', 'Contrainte', 'Livrable','Livrables', 'Généralisation', 'Pistes de solutions', 'Plan d’action', 'Réalisation du plan d’action']
-
-        # Lire le contenu du fichier temp.txt et appliquer les traitements
-        with open('temp.txt', 'r', encoding='utf-8') as fichier_temp:
-            contenu_temp = fichier_temp.read()
-
-
-        doc_final = docx.Document()
-        doc_final.add_picture("logo_cesi.jpg")
-
-        # Afficher le contenu en respectant les catégories et les couleurs
-        afficher_categories(contenu_temp, tab_categorie)
-
-        match = re.search(r'\d+', doc_name)
-        if match:
-            var_num = match.group()
-        print("Prosit numéro : ", var_num)
-
-        print("fichier editer avec succes")
-
-        doc_fini_name = "CER_prosit_" + var_num + "_hugo_laplace.docx"
-        doc_final.save(chemin_fichier + "\\"+ doc_fini_name)
-        print("fichier enregistre sous : ", chemin_fichier + "\\"+ doc_fini_name)
-
-        os.remove('temp.txt')
-        #os.system(doc_fini_name)
-
-
-    except Exception as e:
-        print("Erreur lors de l'extraction du texte :", str(e))
+    words = ['Définition des mots-clefs', 'Mots clés', 'Mots-clés', 'Mot-clés', 'Mots clefs', 'Problématique', 'contexte', 'Contrainte', 'Livrable', 'Généralisation', 'Pistes de solutions', 'Plan d’action', 'Réalisation du plan d’action']
+    found_words = processor.find_words_in_docx(doc, words)
+    processor.copy_file_to_docx(doc, found_words)
