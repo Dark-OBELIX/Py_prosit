@@ -26,7 +26,7 @@ def get_docx_file():
 
 def generate_text(prompt):
     
-    openai.api_key = "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"
+    openai.api_key = " "
 
     completions = openai.Completion.create(
         engine="text-davinci-002",
