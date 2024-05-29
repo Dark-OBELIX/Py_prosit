@@ -1,3 +1,12 @@
 # Py_prosit
 
-Voici le code que j'utilise pour refaire la mise en forme des CER que nous faisont à l'école.
+Here is the code I use to reformat the CER that we do at school.
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Voici le code que j'utilise pour refaire la mise en forme des CER que nous faisons à l'école.
+
+
+
+
+
